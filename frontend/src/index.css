@@ -1,0 +1,72 @@
+/* Slider custom styles */
+.slick-prev,
+.slick-next {
+    z-index: 1;
+}
+
+.slick-prev {
+    left: 15px;
+}
+
+.slick-next {
+    right: 15px;
+}
+
+.slick-prev:before,
+.slick-next:before {
+    color: white;
+}
+
+/* Add smooth scrolling */
+.slick-slider {
+    margin: 0 -10px;
+}
+
+.slick-slide {
+    padding: 0 10px;
+    box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.movie-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+.search-bar {
+  transition: width 0.3s;
+}
+
+.search-bar:focus {
+  width: 350px;
+}
+
+.movie-card-genre {
+  transition: all 0.2s;
+}
+
+.movie-card-genre:hover {
+  transform: scale(1.05);
+}
+
+.rating-count {
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.rating-count:hover {
+  opacity: 1;
+}
+
+.pagination {
+  margin-top: 2rem;
+  padding: 1rem;
+} 
