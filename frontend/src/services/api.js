@@ -56,8 +56,12 @@ export const movieService = {
     },
 
     getRecommendations: async () => {
-        return axios.get(`${API_URL}/movies/recommendations`, {
-            headers: getAuthHeader()
+        const token = localStorage.getItem('token');
+        console.log('Token:', token);
+        return await axios.get(`${API_URL}/movies/recommendations`, {
+            headers: {
+                Authorization: `Bearer ${token}`
+            }
         });
     },
 
