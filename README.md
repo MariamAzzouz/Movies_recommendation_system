@@ -153,6 +153,7 @@ To use the TMDB API, you need to obtain an API key from TMDB and set it in your 
 ## Demo
 
 ![Demo Image for the search ](https://github.com/user-attachments/assets/db541116-5e77-44eb-97fc-08ee322dc782)
-![Demo Image 2](path/to/demo2.png)
+![image](https://github.com/user-attachments/assets/2c8ea623-3e7b-4306-a9f1-02fcf0fee65f)
+
 
 
