@@ -7,6 +7,11 @@ import sqlite3
 from sklearn.decomposition import TruncatedSVD
 import joblib
 import os
+import requests
+
+# Add these constants
+TMDB_BASE_URL = "https://api.themoviedb.org/3"
+TMDB_API_KEY = "2236b1394816474a4a0c9ce17cce84ea"  # Replace with your actual TMDB API key
 
 class RecommendationSystem:
     def __init__(self):
@@ -14,6 +19,7 @@ class RecommendationSystem:
         self.ratings_matrix = None
         self.tfidf_matrix = None
         self.svd_model = None
+        self.seen_movies = {}
         self.user_preferences = defaultdict(lambda: {
             'favorite_genres': defaultdict(int),
             'favorite_movies': set(),
@@ -30,6 +36,7 @@ class RecommendationSystem:
         try:
             # Load movies with basic information
             self.movies_df = pd.read_csv('dataset/movies.csv')
+            print(f"Loaded {len(self.movies_df)} movies.")
             
             # Create genre features
             self.movies_df['genres_list'] = self.movies_df['genres'].str.split('|')
@@ -93,7 +100,7 @@ class RecommendationSystem:
             print(f"Error training models: {str(e)}")
             raise
 
-    def get_content_based_recommendations(self, movie_ids, n=10):
+    def get_content_based_recommendations(self, movie_ids, n=8):
         """Get content-based recommendations based on movie features"""
         try:
             if not movie_ids:
@@ -140,6 +147,7 @@ class RecommendationSystem:
                 user_ratings = pd.read_sql_query(query, conn, params=[user_id])
             
             if user_ratings.empty:
+                print(f"No ratings found for user {user_id}.")
                 return []
             
             # Find similar users based on ratings
@@ -190,10 +198,12 @@ class RecommendationSystem:
             print(f"Error in collaborative recommendations: {str(e)}")
             return []
 
-    def get_hybrid_recommendations(self, user_id, n_recommendations=10):
-        """Combine both recommendation approaches"""
+    def get_hybrid_recommendations(self, user_id, n_recommendations=8):
+        """Get hybrid recommendations based on user preferences and interactions."""
         try:
-            # Get user's favorite movies and ratings
+            print(f"Fetching recommendations for user: {user_id}")
+            
+            # Get user data
             with sqlite3.connect('movie_app.db') as conn:
                 favorites = pd.read_sql_query(
                     "SELECT movie_id FROM user_favorites WHERE user_id = ?",
@@ -205,69 +215,70 @@ class RecommendationSystem:
                     conn,
                     params=[user_id]
                 )
+
+            recommendations = []
             
-            # Get recommendations from both approaches
-            content_based = self.get_content_based_recommendations(
-                favorites['movie_id'].tolist() if not favorites.empty else [],
-                n=n_recommendations
-            )
-            collaborative = self.get_collaborative_recommendations(
-                user_id,
-                n=n_recommendations
-            )
-            
-            # Convert to DataFrames if they're not already
-            if isinstance(content_based, list):
-                content_based = pd.DataFrame(content_based)
-            if isinstance(collaborative, list):
-                collaborative = pd.DataFrame(collaborative)
-            
-            # Add source column to each DataFrame
-            if not content_based.empty:
-                content_based['source'] = 'content'
-            if not collaborative.empty:
-                collaborative['source'] = 'collaborative'
-            
-            # Combine recommendations and ensure uniqueness
-            all_recs = pd.concat(
-                [df for df in [content_based, collaborative] if not df.empty],
-                ignore_index=True
-            )
-            
-            if all_recs.empty:
-                return self._get_popular_recommendations(n_recommendations)
-            
-            # Remove duplicates based on movieId and keep the highest rated version
-            final_recs = (all_recs
-                .sort_values(['mean', 'count'], ascending=[False, False])
-                .drop_duplicates(subset=['movieId'], keep='first')
-                .head(n_recommendations)
-            )
-            
-            # Convert to records and ensure unique movies
-            recommendations = final_recs.to_dict('records')
-            
-            # Additional uniqueness check based on movie title
-            seen_titles = set()
-            unique_recommendations = []
-            for movie in recommendations:
-                if movie['title'] not in seen_titles:
-                    seen_titles.add(movie['title'])
-                    unique_recommendations.append(movie)
-                    if len(unique_recommendations) >= n_recommendations:
-                        break
-            
-            return unique_recommendations
-            
+            # 1. Get content-based recommendations (based on favorites)
+            if not favorites.empty:
+                content_recs = self.get_content_based_recommendations(
+                    favorites['movie_id'].tolist(),
+                    n=n_recommendations * 2  # Get more to ensure enough unique recommendations
+                )
+                if isinstance(content_recs, pd.DataFrame):
+                    recommendations.extend(content_recs.to_dict('records'))
+                elif isinstance(content_recs, list):
+                    recommendations.extend(content_recs)
+
+            # 2. Get collaborative recommendations
+            collab_recs = self.get_collaborative_recommendations(user_id, n=n_recommendations * 2)
+            if isinstance(collab_recs, pd.DataFrame):
+                recommendations.extend(collab_recs.to_dict('records'))
+            elif isinstance(collab_recs, list):
+                recommendations.extend(collab_recs)
+
+            # 3. If we still need more recommendations, add popular movies
+            if len(recommendations) < n_recommendations:
+                popular_recs = self._get_popular_recommendations(n_recommendations * 2)
+                if isinstance(popular_recs, list):
+                    recommendations.extend(popular_recs)
+
+            # Convert to DataFrame for easier processing
+            if recommendations:
+                df_recs = pd.DataFrame(recommendations)
+                
+                # Remove duplicates and sort by rating
+                df_recs = df_recs.drop_duplicates(subset=['movieId'], keep='first')
+                
+                # Remove movies that the user has already rated or favorited
+                if not ratings.empty:
+                    df_recs = df_recs[~df_recs['movieId'].isin(ratings['movie_id'])]
+                if not favorites.empty:
+                    df_recs = df_recs[~df_recs['movieId'].isin(favorites['movie_id'])]
+                
+                # Sort by rating and popularity
+                df_recs = df_recs.sort_values(
+                    ['mean', 'count'],
+                    ascending=[False, False]
+                ).head(n_recommendations)
+                
+                final_recs = df_recs.to_dict('records')
+                print(f"Returning {len(final_recs)} recommendations")
+                return final_recs
+
+            # Fallback to popular recommendations if no recommendations were generated
+            print("Falling back to popular recommendations")
+            return self._get_popular_recommendations(n_recommendations)
+
         except Exception as e:
             print(f"Error in hybrid recommendations: {str(e)}")
             return self._get_popular_recommendations(n_recommendations)
 
-    def _get_popular_recommendations(self, n):
-        """Fallback to popular movies"""
+    def _get_popular_recommendations(self, n=8):
+        """Get popular movies as a fallback recommendation strategy."""
         try:
             popular_movies = self.movies_df[
-                self.movies_df['count'] >= 100
+                (self.movies_df['count'] >= 100) &  # Movies with at least 100 ratings
+                (self.movies_df['mean'] >= 3.5)     # Movies with average rating >= 3.5
             ].sort_values(
                 ['mean', 'count'],
                 ascending=[False, False]
@@ -277,3 +288,51 @@ class RecommendationSystem:
         except Exception as e:
             print(f"Error getting popular recommendations: {str(e)}")
             return []
+
+    def search_movies(self, query):
+        """Search for movies based on a query."""
+        try:
+            # Assuming you have a DataFrame of movies loaded
+            results = self.movies_df[self.movies_df['title'].str.contains(query, case=False, na=False)]
+            return results.to_dict('records')  # Convert to a list of dictionaries
+        except Exception as e:
+            print(f"Error in search_movies: {str(e)}")
+            return []
+
+    def get_movie_poster(self, movie_title):
+        """Fetch movie poster URL from TMDB or return cached URL."""
+        if movie_title in self.seen_movies:
+            return self.seen_movies[movie_title]
+
+        try:
+            clean_title = movie_title.rsplit('(', 1)[0].strip()
+            search_url = f"{TMDB_BASE_URL}/search/movie"
+            response = requests.get(search_url, params={
+                'api_key': TMDB_API_KEY,
+                'query': clean_title
+            })
+            
+            if response.status_code == 200:
+                results = response.json().get('results', [])
+                if results:
+                    poster_path = results[0].get('poster_path')
+                    if poster_path:
+                        poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
+                        self.seen_movies[movie_title] = poster_url
+                        print(f"Poster URL for {movie_title}: {poster_url}")
+                        return poster_url
+            return "https://via.placeholder.com/500x750?text=No+Poster+Available"
+        except Exception as e:
+            print(f"Error fetching poster for {movie_title}: {str(e)}")
+            return "https://via.placeholder.com/500x750?text=No+Poster+Available"
+
+    def add_to_favorites(self, user_id, movie_id):
+        """Add a movie to the user's favorites."""
+        if user_id in self.user_preferences:
+            self.user_preferences[user_id]['favorite_movies'].add(movie_id)
+        else:
+            self.user_preferences[user_id] = {
+                'favorite_movies': {movie_id},
+                'ratings': {},
+                'last_interactions': []
+            }

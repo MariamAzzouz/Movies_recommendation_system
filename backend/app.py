@@ -10,6 +10,7 @@ from functools import wraps
 import sqlite3
 import os
 from datetime import datetime, timedelta
+from decorators import token_required  # Adjust the import based on your project structure
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -168,6 +169,9 @@ def favorite_movie(current_user):
         data = request.get_json()
         movie_id = data.get('movieId')
         
+        if not movie_id:
+            return jsonify({'status': 'error', 'message': 'Movie ID is required'}), 400
+        
         with sqlite3.connect('movie_app.db') as conn:
             c = conn.cursor()
             c.execute('INSERT OR REPLACE INTO user_favorites (user_id, movie_id) VALUES (?, ?)',
@@ -177,6 +181,7 @@ def favorite_movie(current_user):
         recommender.add_to_favorites(current_user, movie_id)
         return jsonify({'status': 'success'})
     except Exception as e:
+        print(f"Error in favorite_movie: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/movies/rate', methods=['POST'])
@@ -203,10 +208,13 @@ def rate_movie(current_user):
 @token_required
 def get_recommendations(current_user):
     try:
+        print(f"Fetching recommendations for user: {current_user}")  # Log the current user
         recommendations = recommender.get_hybrid_recommendations(
             current_user,
             n_recommendations=20
         )
+        
+        #print(f"Recommendations found: {recommendations}")  # Log the recommendations
         
         if not recommendations:
             return jsonify({
@@ -245,109 +253,141 @@ def get_recommendations(current_user):
         }), 500
 
 # Keep existing helper functions
-def get_movie_poster(title):
-    """Get movie poster from TMDB"""
+seen_movies = set()  # Move this outside of the function to maintain state
+
+def get_movie_poster(movie_title):
+    if movie_title in seen_movies:
+        return seen_movies[movie_title]
+
     try:
-        # Remove year from title
-        clean_title = title.split('(')[0].strip()
-        
-        # Search movie in TMDB
-        response = requests.get(
-            f"{TMDB_BASE_URL}/search/movie",
-            params={
-                'api_key': TMDB_API_KEY,
-                'query': clean_title
-            }
-        )
+        clean_title = movie_title.rsplit('(', 1)[0].strip()
+        search_url = f"{TMDB_BASE_URL}/search/movie"
+        response = requests.get(search_url, params={
+            'api_key': TMDB_API_KEY,
+            'query': clean_title
+        })
         
         if response.status_code == 200:
             results = response.json().get('results', [])
             if results:
                 poster_path = results[0].get('poster_path')
                 if poster_path:
-                    return f"{TMDB_IMAGE_BASE_URL}{poster_path}"
-        
-        return None
+                    poster_url = f"{TMDB_IMAGE_BASE_URL}{poster_path}"
+                    seen_movies[movie_title] = poster_url
+                    return poster_url
+        return "https://via.placeholder.com/500x750?text=No+Poster+Available"
     except Exception as e:
-        print(f"Error fetching poster for {title}: {str(e)}")
-        return None
+        print(f"Error fetching poster for {movie_title}: {str(e)}")
+        return "https://via.placeholder.com/500x750?text=No+Poster+Available"
 
 @app.route('/api/movies/<int:movie_id>/details')
 def get_movie_details(movie_id):
     """Get additional movie details from TMDB"""
     try:
-        movie = recommender.movies_df[recommender.movies_df['movieId'] == movie_id].iloc[0]
-        
         # Get TMDB details
-        clean_title = movie['title'].split('(')[0].strip()
         response = requests.get(
-            f"{TMDB_BASE_URL}/search/movie",
-            params={
-                'api_key': TMDB_API_KEY,
-                'query': clean_title
-            }
+            f"{TMDB_BASE_URL}/movie/{movie_id}",
+            params={'api_key': TMDB_API_KEY, 'language': 'en-US'}
         )
+        
+        if response.status_code == 200:
+            tmdb_movie = response.json()
+            # Fetch videos
+            video_response = requests.get(
+                f"{TMDB_BASE_URL}/movie/{movie_id}/videos",
+                params={'api_key': TMDB_API_KEY, 'language': 'en-US'}
+            )
+            videos = video_response.json().get('results', [])
+            return jsonify({
+                'status': 'success',
+                'details': {
+                    'overview': tmdb_movie.get('overview'),
+                    'release_date': tmdb_movie.get('release_date'),
+                    'vote_average': tmdb_movie.get('vote_average'),
+                    'poster_path': f"{TMDB_IMAGE_BASE_URL}{tmdb_movie.get('poster_path')}" if tmdb_movie.get('poster_path') else None,
+                    'backdrop_path': f"{TMDB_IMAGE_BASE_URL}{tmdb_movie.get('backdrop_path')}" if tmdb_movie.get('backdrop_path') else None,
+                    'videos': videos  # Include video details
+                }
+            })
+        
+        return jsonify({'status': 'error', 'message': 'Movie details not found'}), 404
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+# Cache for movie posters (to avoid too many API calls)
+poster_cache = {}
+
+def get_movie_poster(movie_title):
+    try:
+        clean_title = movie_title.rsplit('(', 1)[0].strip()
+        search_url = f"{TMDB_BASE_URL}/search/movie"
+        response = requests.get(search_url, params={
+            'api_key': TMDB_API_KEY,
+            'query': clean_title
+        })
         
         if response.status_code == 200:
             results = response.json().get('results', [])
             if results:
-                tmdb_movie = results[0]
-                return jsonify({
-                    'status': 'success',
-                    'details': {
-                        'overview': tmdb_movie.get('overview'),
-                        'release_date': tmdb_movie.get('release_date'),
-                        'vote_average': tmdb_movie.get('vote_average'),
-                        'poster_path': f"{TMDB_IMAGE_BASE_URL}{tmdb_movie.get('poster_path')}" if tmdb_movie.get('poster_path') else None,
-                        'backdrop_path': f"{TMDB_IMAGE_BASE_URL}{tmdb_movie.get('backdrop_path')}" if tmdb_movie.get('backdrop_path') else None
-                    }
-                })
-        
-        return jsonify({
-            'status': 'error',
-            'message': 'Movie details not found'
-        }), 404
+                poster_path = results[0].get('poster_path')
+                if poster_path:
+                    poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
+                    print(f"Poster URL for {movie_title}: {poster_url}")  # Log the URL
+                    return poster_url
+                
+        return "https://via.placeholder.com/500x750?text=No+Poster+Available"
         
     except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
+        print(f"Error fetching poster for {movie_title}: {str(e)}")
+        return "https://via.placeholder.com/500x750?text=No+Poster+Available"
 
 @app.route('/movies')
 def get_movies():
     try:
         page = int(request.args.get('page', 1))
-        per_page = int(request.args.get('per_page', 12))  # 12 movies per page
+        per_page = int(request.args.get('per_page', 12))
+
+        # Load movies from CSV
+        movies_df = pd.read_csv('dataset/movies.csv')
+        ratings_df = pd.read_csv('dataset/ratings.csv')
+
+        # Calculate average ratings
+        ratings_agg = ratings_df.groupby('movieId').agg({
+            'rating': ['mean', 'count']
+        }).reset_index()
         
-        # Calculate offset
-        offset = (page - 1) * per_page
+        ratings_agg.columns = ['movieId', 'mean_rating', 'rating_count']
+
+        # Merge with movies
+        movies_df = movies_df.merge(ratings_agg, on='movieId', how='left')
         
-        # Get total count of movies
-        with sqlite3.connect('movie_app.db') as conn:
-            cursor = conn.cursor()
-            total_movies = cursor.execute('SELECT COUNT(*) FROM movies').fetchone()[0]
-            
-            # Get paginated movies
-            movies = cursor.execute('''
-                SELECT * FROM movies 
-                ORDER BY rating DESC 
-                LIMIT ? OFFSET ?
-            ''', (per_page, offset)).fetchall()
-        
-        # Calculate total pages
+        # Sort by rating count (popularity)
+        movies_df = movies_df.sort_values('rating_count', ascending=False)
+
+        # Calculate pagination
+        total_movies = len(movies_df)
         total_pages = -(-total_movies // per_page)  # Ceiling division
         
-        movies_list = [{
-            'id': movie[0],
-            'title': movie[1],
-            'genres': movie[2].split('|'),
-            'rating': float(movie[3]) if movie[3] else 0.0,
-            'ratingCount': int(movie[4]) if movie[4] else 0,
-            'year': int(movie[1][-5:-1]) if movie[1].endswith(')') else None,
-            'posterUrl': get_movie_poster(movie[1])
-        } for movie in movies]
-        
+        # Get page of movies
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        page_movies = movies_df.iloc[start_idx:end_idx]
+
+        # Format response with posters
+        movies_list = []
+        for _, movie in page_movies.iterrows():
+            poster_url = get_movie_poster(movie['title'])
+            movies_list.append({
+                'id': int(movie['movieId']),
+                'title': movie['title'],
+                'genres': movie['genres'].split('|'),
+                'rating': float(movie['mean_rating']) if pd.notnull(movie['mean_rating']) else 0.0,
+                'ratingCount': int(movie['rating_count']) if pd.notnull(movie['rating_count']) else 0,
+                'year': int(movie['title'][-5:-1]) if movie['title'].endswith(')') else None,
+                'posterUrl': poster_url
+            })
+
         return jsonify({
             'status': 'success',
             'data': {
@@ -358,7 +398,9 @@ def get_movies():
                 'total_movies': total_movies
             }
         })
+
     except Exception as e:
+        print(f"Error in get_movies: {str(e)}")
         return jsonify({
             'status': 'error',
             'message': str(e)
@@ -370,6 +412,12 @@ def search_movies():
         query = request.args.get('q', '').lower()
         matches = recommender.search_movies(query)
         
+        if not matches:
+            return jsonify({'status': 'success', 'data': []})
+        
+        # Use a dictionary to ensure unique movies based on movieId
+        unique_movies = {movie['movieId']: movie for movie in matches}
+        
         # Format the response
         movies_list = [{
             'id': int(movie['movieId']),
@@ -379,17 +427,11 @@ def search_movies():
             'ratingCount': int(movie['count']) if pd.notnull(movie['count']) else 0,
             'year': int(movie['title'][-5:-1]) if movie['title'].endswith(')') else None,
             'posterUrl': get_movie_poster(movie['title'])
-        } for movie in matches]
+        } for movie in unique_movies.values()]
         
-        return jsonify({
-            'status': 'success',
-            'data': movies_list
-        })
+        return jsonify({'status': 'success', 'data': movies_list})
     except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/movies/featured')
 def get_featured_movies():
