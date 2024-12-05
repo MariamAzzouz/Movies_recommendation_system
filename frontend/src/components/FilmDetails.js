@@ -13,6 +13,7 @@ const FilmDetails = () => {
     const fetchFilmDetails = async () => {
       try {
         const response = await axios.get(`http://localhost:5000/api/movies/${id}/details`);
+        console.log('Film details response:', response.data);
         setFilm(response.data.details);
       } catch (err) {
         setError('Failed to fetch film details');

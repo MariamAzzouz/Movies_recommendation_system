@@ -10,6 +10,7 @@ import {
   Skeleton
 } from '@mui/material';
 import FavoriteIcon from '@mui/icons-material/Favorite';
+import { Link } from 'react-router-dom';
 
 const MovieCardNew = ({ movie, onRate, onFavorite, isFavorite }) => {
   const [imageError, setImageError] = useState(false);
@@ -36,7 +37,7 @@ const MovieCardNew = ({ movie, onRate, onFavorite, isFavorite }) => {
       )}
       <CardMedia
         component="img"
-        height={400}
+        height="400"
         image={imageError ? 
           "https://via.placeholder.com/500x750?text=No+Poster" : 
           movie.posterUrl
@@ -49,15 +50,9 @@ const MovieCardNew = ({ movie, onRate, onFavorite, isFavorite }) => {
           display: imageLoading ? 'none' : 'block'
         }}
       />
-      <CardContent sx={{ flexGrow: 1 }}>
-        <Typography gutterBottom variant="h6" component="div" noWrap>
-          {movie.title}
-        </Typography>
-        
-        <Typography variant="body2" color="text.secondary" gutterBottom>
-          {movie.year}
-        </Typography>
-        
+      <CardContent>
+        <Typography variant="h6">{movie.title}</Typography>
+        <Typography variant="body2">{movie.year}</Typography>
         <Box display="flex" alignItems="center" mb={1}>
           <Rating
             name={`rating-${movie.id}`}
@@ -70,23 +65,27 @@ const MovieCardNew = ({ movie, onRate, onFavorite, isFavorite }) => {
             ({movie.ratingCount?.toLocaleString() || 0})
           </Typography>
         </Box>
-
         <Box display="flex" flexWrap="wrap" gap={0.5} mb={1}>
-          {movie.genres.map((genre, index) => (
-            <Typography
-              key={index}
-              variant="caption"
-              sx={{
-                bgcolor: 'action.selected',
-                padding: '2px 6px',
-                borderRadius: 1
-              }}
-            >
-              {genre}
+          {Array.isArray(movie.genres) && movie.genres.length > 0 ? (
+            movie.genres.map((genre, index) => (
+              <Typography
+                key={index}
+                variant="caption"
+                sx={{
+                  bgcolor: 'action.selected',
+                  padding: '2px 6px',
+                  borderRadius: 1
+                }}
+              >
+                {genre}
+              </Typography>
+            ))
+          ) : (
+            <Typography variant="caption" color="text.secondary">
+              No genres available
             </Typography>
-          ))}
+          )}
         </Box>
-
         <Box display="flex" justifyContent="flex-end">
           <IconButton
             onClick={() => onFavorite?.(movie.id)}

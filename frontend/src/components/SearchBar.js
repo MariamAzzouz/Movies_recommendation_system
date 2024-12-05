@@ -42,27 +42,12 @@ const SearchBar = ({ onSearchResults }) => {
 
   const debouncedSearch = useCallback(
     debounce(searchMovies, 300),
-    [searchType]
+    []
   );
-
-  const handleSearchTypeChange = (event, newType) => {
-    if (newType !== null) {
-      setSearchType(newType);
-      if (inputValue) {
-        debouncedSearch(inputValue);
-      }
-    }
-  };
 
   const handleInputChange = (event, value) => {
     setInputValue(value);
     debouncedSearch(value);
-  };
-
-  const handleOptionSelect = (event, value) => {
-    if (value) {
-      onSearchResults([value]);
-    }
   };
 
   return (
@@ -70,7 +55,7 @@ const SearchBar = ({ onSearchResults }) => {
       <ToggleButtonGroup
         value={searchType}
         exclusive
-        onChange={handleSearchTypeChange}
+        onChange={(event, newType) => setSearchType(newType)}
         size="small"
         sx={{ backgroundColor: 'white', borderRadius: 1 }}
       >
@@ -88,14 +73,10 @@ const SearchBar = ({ onSearchResults }) => {
       <Autocomplete
         freeSolo
         options={options}
-        getOptionLabel={(option) => {
-          if (typeof option === 'string') return option;
-          return option.title || '';
-        }}
+        getOptionLabel={(option) => (typeof option === 'string' ? option : option.title || '')}
         sx={{ width: 300 }}
         loading={loading}
         onInputChange={handleInputChange}
-        onChange={handleOptionSelect}
         renderInput={(params) => (
           <TextField
             {...params}
